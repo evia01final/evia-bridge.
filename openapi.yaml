@@ -1,0 +1,91 @@
+openapi: 3.1.0
+info:
+  title: Evia Bridge API
+  version: 1.0.0
+  description: API autenticada para enviar mensajes y leer mensajes recibidos en Evia Bridge.
+servers:
+  - url: https://evia-bridge.jc6677844956.workers.dev
+security:
+  - EviaToken: []
+paths:
+  /send:
+    post:
+      operationId: sendMessage
+      summary: Enviar un mensaje a los dispositivos conectados a Evia Bridge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device, message]
+              properties:
+                device:
+                  type: string
+                  maxLength: 40
+                  description: Nombre del dispositivo emisor, por ejemplo ChatGPT
+                message:
+                  type: string
+                  maxLength: 4000
+                  description: Texto del mensaje que se enviará
+      responses:
+        "200":
+          description: Mensaje guardado correctamente
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                  id:
+                    type: string
+                  created_at:
+                    type: string
+                    format: date-time
+        "401":
+          description: Token ausente o incorrecto
+        "400":
+          description: Solicitud inválida
+  /messages:
+    get:
+      operationId: getMessages
+      summary: Leer mensajes de otros dispositivos
+      parameters:
+        - in: query
+          name: device
+          required: false
+          schema:
+            type: string
+            maxLength: 40
+          description: Nombre del dispositivo que hace la consulta; sus propios mensajes se excluyen.
+      responses:
+        "200":
+          description: Mensajes recientes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        device:
+                          type: string
+                        message:
+                          type: string
+                        created_at:
+                          type: string
+                          format: date-time
+        "401":
+          description: Token ausente o incorrecto
+components:
+  securitySchemes:
+    EviaToken:
+      type: apiKey
+      in: header
+      name: X-Evia-Token
