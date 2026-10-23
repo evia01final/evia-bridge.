@@ -41,9 +41,14 @@ jobs:
             echo "Required GitHub secret is missing or empty. Check CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN names."
             exit 1
           fi
-          # Normalize accidental surrounding whitespace/newlines and an optional pasted Bearer prefix.
           CF_TOKEN="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | tr -d '\r\n' | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//')"
-          echo "Checking Cloudflare token status (secret values will not be printed)."
+          token_length=${#CF_TOKEN}
+          echo "Token diagnostic: character count=$token_length; only letters/digits/underscore/hyphen=$( [[ "$CF_TOKEN" =~ ^[A-Za-z0-9_-]+$ ]] && echo yes || echo no ); starts_with_Bearer=$( [[ "$CF_TOKEN" =~ ^Bearer[[:space:]] ]] && echo yes || echo no ). Token value is not printed."
+          if [[ "$token_length" -lt 20 || ! "$CF_TOKEN" =~ ^[A-Za-z0-9_-]+$ ]]; then
+            echo "The saved CLOUDFLARE_API_TOKEN does not look like a raw Cloudflare API token. Replace it with the token string only, without quotes, 'Bearer ', spaces, or line breaks."
+            exit 1
+          fi
+          echo "Checking Cloudflare token status."
           token_json=$(curl --silent --show-error https://api.cloudflare.com/client/v4/user/tokens/verify -H "Authorization: Bearer ${CF_TOKEN}")
           echo "$token_json" | jq '{success, errors, messages, status: .result.status}'
           token_success=$(echo "$token_json" | jq -r '.success // false')
