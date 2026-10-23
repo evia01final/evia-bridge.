@@ -75,7 +75,7 @@ export default {
       });
     }
 
-    if (!["/send", "/messages"].includes(url.pathname)) {
+    if (!["/send", "/messages", "/auto-reply"].includes(url.pathname)) {
       return json({ error: "Ruta no encontrada" }, 404);
     }
 
