@@ -83,7 +83,7 @@ export class EviaStorage {
       );
 
       // Server-side acknowledgements do not depend on a browser polling in the background.
-      if (!/^RECIBIDO(?:\\b|:)/i.test(message)) {
+      if (!/^RECIBIDO(?:\b|:)/i.test(message)) {
         const enabled = this.ctx.storage.sql.exec("SELECT device FROM auto_reply WHERE enabled = 1").toArray();
         for (const row of enabled) {
           if (row.device === device) continue;
