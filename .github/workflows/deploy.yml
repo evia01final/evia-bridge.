@@ -42,10 +42,15 @@ jobs:
             exit 1
           fi
           CF_TOKEN="$(printf '%s' "$CLOUDFLARE_API_TOKEN" | tr -d '\r\n' | sed -E 's/^[[:space:]]*Bearer[[:space:]]+//I; s/^[[:space:]]+//; s/[[:space:]]+$//')"
+          # Remove only a matching pair of surrounding quotes, if present.
+          if [[ "$CF_TOKEN" =~ ^\".*\"$ || "$CF_TOKEN" =~ ^\'.*\'$ ]]; then
+            CF_TOKEN="${CF_TOKEN:1:${#CF_TOKEN}-2}"
+          fi
           token_length=${#CF_TOKEN}
-          echo "Token diagnostic: character count=$token_length; only letters/digits/underscore/hyphen=$( [[ "$CF_TOKEN" =~ ^[A-Za-z0-9_-]+$ ]] && echo yes || echo no ); starts_with_Bearer=$( [[ "$CF_TOKEN" =~ ^Bearer[[:space:]] ]] && echo yes || echo no ). Token value is not printed."
+          if [[ "$CF_TOKEN" =~ ^[A-Za-z0-9_-]+$ ]]; then token_chars_ok=yes; else token_chars_ok=no; fi
+          echo "Token diagnostic: character count=$token_length; allowed token characters only=$token_chars_ok. Token value is not printed."
           if [[ "$token_length" -lt 20 || ! "$CF_TOKEN" =~ ^[A-Za-z0-9_-]+$ ]]; then
-            echo "The saved CLOUDFLARE_API_TOKEN does not look like a raw Cloudflare API token. Replace it with the token string only, without quotes, 'Bearer ', spaces, or line breaks."
+            echo "The saved CLOUDFLARE_API_TOKEN is not in raw token format. It must contain only the original token characters, with no labels, quotes, spaces, punctuation, or line breaks."
             exit 1
           fi
           echo "Checking Cloudflare token status."
