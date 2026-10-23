@@ -42,66 +42,70 @@ $('send').onclick=async()=>{const message=$('message').value.trim(),device=$('de
 $('refresh').onclick=refresh;
 $('token').addEventListener('change',()=>{loadAutoReply();refresh()});
 $('device').addEventListener('change',loadAutoReply);
-loadAutoReply();
-setInterval(()=>{if($('token').value.trim())refresh()},10000);
+loadAutoReply();setInterval(()=>{if($('token').value.trim())refresh()},10000);
 </script></main></body></html>`;
 
+async function coordinate(env) {
+  if (!env.OPENAI_API_KEY || !env.EVIA_STORAGE) throw new Error("Missing OPENAI_API_KEY or EVIA_STORAGE binding");
+  const id = env.EVIA_STORAGE.idFromName("evia-shared-room");
+  const stub = env.EVIA_STORAGE.get(id);
+  // Process a small bounded batch per scheduled run to keep execution predictable.
+  for (let i = 0; i < 5; i++) {
+    const claim = await stub.fetch("https://evia-storage/coordinator/claim", { method: "POST" });
+    if (!claim.ok) throw new Error("Could not claim queued message");
+    const { message } = await claim.json();
+    if (!message) break;
+    const userText = String(message.message).replace(/^@Evia\\s*/i, "").slice(0, 3500);
+    let answer = "";
+    try {
+      const response = await fetch("https://api.openai.com/v1/responses", {
+        method: "POST",
+        headers: { "Authorization": "Bearer " + env.OPENAI_API_KEY, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: env.OPENAI_MODEL || "gpt-4.1-mini",
+          instructions: "Eres Evia, una asistente útil que conversa en español. Responde al mensaje recibido de forma clara, breve y segura. Estás respondiendo dentro de un puente entre dispositivos; no afirmes que eres otra instancia privada de ChatGPT ni que puedes actuar fuera de este servicio.",
+          input: userText,
+          max_output_tokens: 500
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error?.message || "OpenAI API error " + response.status);
+      answer = (data.output || []).flatMap(item => item.content || []).filter(item => item.type === "output_text").map(item => item.text).join("\\n").trim();
+      if (!answer) answer = "No pude generar una respuesta esta vez.";
+    } catch (error) {
+      answer = "Evia IA: no pude procesar el mensaje (" + String(error.message || error).slice(0, 180) + ").";
+    }
+    const sent = await stub.fetch("https://evia-storage/coordinator/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: "Respuesta a " + message.device + ": " + answer })
+    });
+    if (!sent.ok) throw new Error("Could not save coordinator response");
+  }
+}
+
 export default {
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(coordinate(env));
+  },
   async fetch(request, env) {
     const url = new URL(request.url);
-
-    // Same-origin app requests do not need CORS. Do not grant arbitrary sites
-    // permission to read private messages with a token supplied by the user.
-    if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: securityHeaders });
-    }
-
+    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: securityHeaders });
     if (url.pathname === "/health") {
-      return json({
-        ok: true,
-        service: "Evia Bridge",
-        storageConfigured: Boolean(env.EVIA_STORAGE),
-        tokenConfigured: Boolean(env.EVIA_BRIDGE_TOKEN)
-      });
+      return json({ ok: true, service: "Evia Bridge", storageConfigured: Boolean(env.EVIA_STORAGE), tokenConfigured: Boolean(env.EVIA_BRIDGE_TOKEN), coordinatorConfigured: Boolean(env.OPENAI_API_KEY) });
     }
-
-    if (url.pathname === "/") {
-      return new Response(html, {
-        headers: {
-          ...securityHeaders,
-          "Content-Type": "text/html; charset=utf-8",
-          "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
-        }
-      });
-    }
-
-    if (!["/send", "/messages", "/auto-reply"].includes(url.pathname)) {
-      return json({ error: "Ruta no encontrada" }, 404);
-    }
-
+    if (url.pathname === "/") return new Response(html, { headers: { ...securityHeaders, "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" } });
+    if (!["/send", "/messages", "/auto-reply"].includes(url.pathname)) return json({ error: "Ruta no encontrada" }, 404);
     const expected = env.EVIA_BRIDGE_TOKEN;
     const provided = request.headers.get("X-Evia-Token");
-    if (!expected || !provided || provided !== expected) {
-      return json({ error: "No autorizado: revisa el token" }, 401);
-    }
-
-    if (!env.EVIA_STORAGE) {
-      return json({ error: "Falta configurar el Durable Object EVIA_STORAGE" }, 503);
-    }
-
+    if (!expected || !provided || provided !== expected) return json({ error: "No autorizado: revisa el token" }, 401);
+    if (!env.EVIA_STORAGE) return json({ error: "Falta configurar el Durable Object EVIA_STORAGE" }, 503);
     if (request.method === "POST") {
       const contentLength = Number(request.headers.get("Content-Length") || 0);
-      if (contentLength > 16_384) return json({ error: "Solicitud demasiado grande" }, 413);
-      if (!request.headers.get("Content-Type")?.toLowerCase().includes("application/json")) {
-        return json({ error: "Content-Type debe ser application/json" }, 415);
-      }
-    } else if (request.method !== "GET") {
-      return json({ error: "Método no permitido" }, 405);
-    }
-
+      if (contentLength > 16384) return json({ error: "Solicitud demasiado grande" }, 413);
+      if (!request.headers.get("Content-Type")?.toLowerCase().includes("application/json")) return json({ error: "Content-Type debe ser application/json" }, 415);
+    } else if (request.method !== "GET") return json({ error: "Método no permitido" }, 405);
     const id = env.EVIA_STORAGE.idFromName("evia-shared-room");
-    return env.EVIA_STORAGE.get(id).fetch(
-      new Request("https://evia-storage" + url.pathname + url.search, request)
-    );
+    return env.EVIA_STORAGE.get(id).fetch(new Request("https://evia-storage" + url.pathname + url.search, request));
   }
 };
