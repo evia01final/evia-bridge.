@@ -1,33 +1,20 @@
 export { EviaStorage } from "./storage.js";
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, X-Evia-Token",
-  "Access-Control-Max-Age": "86400"
+const securityHeaders = {
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "no-referrer",
+  "X-Frame-Options": "DENY",
+  "Cache-Control": "no-store"
 };
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" }
+    headers: { ...securityHeaders, "Content-Type": "application/json; charset=utf-8" }
   });
 }
 
-export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
-
-    if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: corsHeaders });
-    }
-
-    if (url.pathname === "/health") {
-      return json({ ok: true, service: "Evia Bridge", storageConfigured: Boolean(env.EVIA_STORAGE), tokenConfigured: Boolean(env.EVIA_BRIDGE_TOKEN) });
-    }
-
-    if (url.pathname === "/") {
-      return new Response(`<!doctype html>
+const html = `<!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Evia Bridge</title>
 <style>
 body{font:16px system-ui,sans-serif;max-width:680px;margin:24px auto;padding:0 16px;background:#f7f7fb;color:#1c1c24}
@@ -49,18 +36,64 @@ async function refresh(){if(!$('token').value.trim()){ $('status').textContent='
 $('send').onclick=async()=>{const message=$('message').value.trim(),device=$('device').value.trim();if(!message||!device){$('status').textContent='Escribe un mensaje y el nombre del dispositivo.';return}try{const r=await fetch('/send',{method:'POST',headers:headers(),body:JSON.stringify({device,message})});const d=await r.json();if(!r.ok)throw Error(d.error||'Error '+r.status);$('message').value='';$('status').textContent='Mensaje enviado.';await refresh()}catch(e){$('status').textContent='Error: '+e.message}};
 $('refresh').onclick=refresh;
 setInterval(()=>{if($('token').value.trim())refresh()},10000);
-</script></main></body></html>`, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+</script></main></body></html>`;
+
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
+
+    // Same-origin app requests do not need CORS. Do not grant arbitrary sites
+    // permission to read private messages with a token supplied by the user.
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: securityHeaders });
     }
 
-    if (!["/send", "/messages"].includes(url.pathname)) return json({ error: "Ruta no encontrada" }, 404);
+    if (url.pathname === "/health") {
+      return json({
+        ok: true,
+        service: "Evia Bridge",
+        storageConfigured: Boolean(env.EVIA_STORAGE),
+        tokenConfigured: Boolean(env.EVIA_BRIDGE_TOKEN)
+      });
+    }
+
+    if (url.pathname === "/") {
+      return new Response(html, {
+        headers: {
+          ...securityHeaders,
+          "Content-Type": "text/html; charset=utf-8",
+          "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        }
+      });
+    }
+
+    if (!["/send", "/messages"].includes(url.pathname)) {
+      return json({ error: "Ruta no encontrada" }, 404);
+    }
 
     const expected = env.EVIA_BRIDGE_TOKEN;
     const provided = request.headers.get("X-Evia-Token");
-    if (!expected || !provided || provided !== expected) return json({ error: "No autorizado: revisa el token" }, 401);
+    if (!expected || !provided || provided !== expected) {
+      return json({ error: "No autorizado: revisa el token" }, 401);
+    }
 
-    if (!env.EVIA_STORAGE) return json({ error: "Falta configurar el Durable Object EVIA_STORAGE" }, 503);
+    if (!env.EVIA_STORAGE) {
+      return json({ error: "Falta configurar el Durable Object EVIA_STORAGE" }, 503);
+    }
+
+    if (request.method === "POST") {
+      const contentLength = Number(request.headers.get("Content-Length") || 0);
+      if (contentLength > 16_384) return json({ error: "Solicitud demasiado grande" }, 413);
+      if (!request.headers.get("Content-Type")?.toLowerCase().includes("application/json")) {
+        return json({ error: "Content-Type debe ser application/json" }, 415);
+      }
+    } else if (request.method !== "GET") {
+      return json({ error: "Método no permitido" }, 405);
+    }
 
     const id = env.EVIA_STORAGE.idFromName("evia-shared-room");
-    return env.EVIA_STORAGE.get(id).fetch(new Request("https://evia-storage" + url.pathname + url.search, request));
+    return env.EVIA_STORAGE.get(id).fetch(
+      new Request("https://evia-storage" + url.pathname + url.search, request)
+    );
   }
 };
