@@ -1,191 +1,66 @@
+export { EviaStorage } from "./storage.js";
 
-
-const cors = {
-
+const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-
-  "Access-Control-Allow-Headers": "Content-Type, X-Evia-Token"
-
+  "Access-Control-Allow-Headers": "Content-Type, X-Evia-Token",
+  "Access-Control-Max-Age": "86400"
 };
 
 function json(data, status = 200) {
-
   return new Response(JSON.stringify(data), {
-
     status,
-
-    headers: { ...cors, "Content-Type": "application/json; charset=utf-8" }
-
+    headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" }
   });
-
-}
-
-export class EviaStorage {
-
-  constructor(ctx, env) {
-
-    this.ctx = ctx;
-
-    this.env = env;
-
-    this.ctx.blockConcurrencyWhile(async () => {
-
-      await this.ctx.storage.sql.exec(`
-
-        CREATE TABLE IF NOT EXISTS messages (
-
-          id TEXT PRIMARY KEY,
-
-          device TEXT NOT NULL,
-
-          message TEXT NOT NULL,
-
-          created_at TEXT NOT NULL
-
-        )
-
-      `);
-
-    });
-
-  }
-
-  async fetch(request) {
-
-    const url = new URL(request.url);
-
-    if (request.method === "OPTIONS") {
-
-      return new Response(null, { headers: cors });
-
-    }
-
-    if (url.pathname === "/send" && request.method === "POST") {
-
-      let body;
-
-      try {
-
-        body = await request.json();
-
-      } catch {
-
-        return json({ error: "JSON inválido" }, 400);
-
-      }
-
-      const device = String(body.device || "").trim().slice(0, 40);
-
-      const message = String(body.message || "").trim().slice(0, 4000);
-
-      if (!device || !message) {
-
-        return json({ error: "Falta dispositivo o mensaje" }, 400);
-
-      }
-
-      const id = crypto.randomUUID();
-
-      const createdAt = new Date().toISOString();
-
-      this.ctx.storage.sql.exec(
-
-        "INSERT INTO messages (id, device, message, created_at) VALUES (?, ?, ?, ?)",
-
-        id, device, message, createdAt
-
-      );
-
-      return json({ ok: true, id, createdAt });
-
-    }
-
-    if (url.pathname === "/messages" && request.method === "GET") {
-
-      const device = url.searchParams.get("device") || "";
-
-      const result = this.ctx.storage.sql.exec(
-
-        "SELECT id, device, message, created_at FROM messages ORDER BY created_at DESC LIMIT 100"
-
-      );
-
-      const messages = [...result].filter(item => item.device !== device);
-
-      return json({ messages });
-
-    }
-
-    if (url.pathname === "/health") {
-
-      return json({ ok: true, service: "Evia Bridge" });
-
-    }
-
-    return json({ error: "Ruta no encontrada" }, 404);
-
-  }
-
 }
 
 export default {
-
   async fetch(request, env) {
-
     const url = new URL(request.url);
 
     if (request.method === "OPTIONS") {
-
-      return new Response(null, { headers: cors });
-
-    }
-
-    if (url.pathname === "/") {
-
-      return new Response(
-
-        "<!doctype html><html lang='es'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Evia Bridge</title><h1>Evia Bridge</h1><p>Puente de mensajes disponible.</p><p>Usa /health para comprobar el servicio.</p></html>",
-
-        { headers: { ...cors, "Content-Type": "text/html; charset=utf-8" } }
-
-      );
-
-    }
-
-    if (url.pathname !== "/health") {
-
-      const expected = env.EVIA_BRIDGE_TOKEN;
-
-      const provided = request.headers.get("X-Evia-Token");
-
-      if (!expected || !provided || provided !== expected) {
-
-        return json({ error: "No autorizado" }, 401);
-
-      }
-
+      return new Response(null, { status: 204, headers: corsHeaders });
     }
 
     if (url.pathname === "/health") {
-
-      return json({ ok: true, service: "Evia Bridge" });
-
+      return json({ ok: true, service: "Evia Bridge", storageConfigured: Boolean(env.EVIA_STORAGE), tokenConfigured: Boolean(env.EVIA_BRIDGE_TOKEN) });
     }
 
+    if (url.pathname === "/") {
+      return new Response(`<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Evia Bridge</title>
+<style>
+body{font:16px system-ui,sans-serif;max-width:680px;margin:24px auto;padding:0 16px;background:#f7f7fb;color:#1c1c24}
+main{background:white;border:1px solid #ddd;border-radius:16px;padding:20px}
+input,textarea,button{font:inherit;width:100%;box-sizing:border-box;padding:12px;margin:6px 0;border-radius:10px;border:1px solid #bbb}
+button{background:#2459d3;color:white;border:0;font-weight:600}
+article{white-space:pre-wrap;border-bottom:1px solid #eee;padding:10px 0;overflow-wrap:anywhere}
+small{color:#555}
+</style></head><body><main><h1>Evia Bridge</h1><p>Intercambio de mensajes entre dispositivos.</p>
+<label>Token compartido<input id="token" type="password" autocomplete="off" placeholder="Pega aquí el token configurado en Cloudflare"></label>
+<label>Nombre de este dispositivo<input id="device" value="iphone" maxlength="40"></label>
+<label>Mensaje<textarea id="message" rows="3" maxlength="4000" placeholder="Escribe un mensaje"></textarea></label>
+<button id="send">Enviar mensaje</button><button id="refresh" type="button">Actualizar mensajes</button>
+<p id="status" role="status">Listo para conectar.</p><h2>Mensajes recibidos</h2><section id="messages"></section>
+<script>
+const $=id=>document.getElementById(id);
+const headers=()=>({'Content-Type':'application/json','X-Evia-Token':$('token').value.trim()});
+async function refresh(){if(!$('token').value.trim()){ $('status').textContent='Introduce el token compartido.';return;} try{const r=await fetch('/messages?device='+encodeURIComponent($('device').value.trim()),{headers:headers()});const d=await r.json();if(!r.ok)throw Error(d.error||'Error '+r.status);$('messages').replaceChildren();for(const m of d.messages){const a=document.createElement('article');a.textContent=(m.device||'dispositivo')+' · '+new Date(m.created_at).toLocaleString()+'\\n'+m.message;$('messages').append(a)}$('status').textContent='Actualizado. Mensajes: '+d.messages.length;}catch(e){$('status').textContent='Error: '+e.message}}
+$('send').onclick=async()=>{const message=$('message').value.trim(),device=$('device').value.trim();if(!message||!device){$('status').textContent='Escribe un mensaje y el nombre del dispositivo.';return}try{const r=await fetch('/send',{method:'POST',headers:headers(),body:JSON.stringify({device,message})});const d=await r.json();if(!r.ok)throw Error(d.error||'Error '+r.status);$('message').value='';$('status').textContent='Mensaje enviado.';await refresh()}catch(e){$('status').textContent='Error: '+e.message}};
+$('refresh').onclick=refresh;
+setInterval(()=>{if($('token').value.trim())refresh()},10000);
+</script></main></body></html>`, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    }
+
+    if (!["/send", "/messages"].includes(url.pathname)) return json({ error: "Ruta no encontrada" }, 404);
+
+    const expected = env.EVIA_BRIDGE_TOKEN;
+    const provided = request.headers.get("X-Evia-Token");
+    if (!expected || !provided || provided !== expected) return json({ error: "No autorizado: revisa el token" }, 401);
+
+    if (!env.EVIA_STORAGE) return json({ error: "Falta configurar el Durable Object EVIA_STORAGE" }, 503);
+
     const id = env.EVIA_STORAGE.idFromName("evia-shared-room");
-
-    const stub = env.EVIA_STORAGE.get(id);
-
-    return stub.fetch(new Request(
-
-      "https://evia-storage" + url.pathname + url.search,
-
-      request
-
-    ));
-
+    return env.EVIA_STORAGE.get(id).fetch(new Request("https://evia-storage" + url.pathname + url.search, request));
   }
-
 };

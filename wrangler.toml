@@ -1,0 +1,11 @@
+name = "evia-bridge"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+[[durable_objects.bindings]]
+name = "EVIA_STORAGE"
+class_name = "EviaStorage"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["EviaStorage"]
