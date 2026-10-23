@@ -25,7 +25,8 @@ test("health reports configured bindings without revealing the secret", async ()
     ok: true,
     service: "Evia Bridge",
     storageConfigured: true,
-    tokenConfigured: true
+    tokenConfigured: true,
+    coordinatorConfigured: false
   });
   assert.equal(response.headers.get("cache-control"), "no-store");
 });
