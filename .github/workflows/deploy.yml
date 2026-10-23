@@ -42,19 +42,20 @@ jobs:
             exit 1
           fi
           echo "Checking Cloudflare token status (secret values will not be printed)."
-          token_json=$(curl --silent --show-error --fail-with-body https://api.cloudflare.com/client/v4/user/tokens/verify -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}") || { echo "Cloudflare rejected token verification request."; exit 1; }
+          token_json=$(curl --silent --show-error https://api.cloudflare.com/client/v4/user/tokens/verify -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
           echo "$token_json" | jq '{success, errors, messages, status: .result.status}'
+          token_success=$(echo "$token_json" | jq -r '.success // false')
           token_status=$(echo "$token_json" | jq -r '.result.status // "unknown"')
-          if [[ "$token_status" != "active" ]]; then
-            echo "Cloudflare token is not active (reported status: $token_status)."
+          if [[ "$token_success" != "true" || "$token_status" != "active" ]]; then
+            echo "Cloudflare did not confirm an active token. See the sanitized API error above."
             exit 1
           fi
           echo "Checking that the account ID is valid and accessible to this token."
-          account_json=$(curl --silent --show-error --fail-with-body "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}" -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}") || { echo "Cloudflare could not access the configured account ID. Check CLOUDFLARE_ACCOUNT_ID and token account permissions."; exit 1; }
+          account_json=$(curl --silent --show-error "https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}" -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}")
           echo "$account_json" | jq '{success, errors, messages, account_name: .result.name}'
           account_success=$(echo "$account_json" | jq -r '.success // false')
           if [[ "$account_success" != "true" ]]; then
-            echo "Cloudflare did not confirm access to the configured account."
+            echo "Cloudflare did not confirm access to the configured account. See the sanitized API error above."
             exit 1
           fi
 
