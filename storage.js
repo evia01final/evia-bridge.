@@ -1,13 +1,12 @@
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, X-Evia-Token"
+const securityHeaders = {
+  "X-Content-Type-Options": "nosniff",
+  "Cache-Control": "no-store"
 };
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" }
+    headers: { ...securityHeaders, "Content-Type": "application/json; charset=utf-8" }
   });
 }
 
@@ -22,7 +21,6 @@ export class EviaStorage {
         message TEXT NOT NULL,
         created_at TEXT NOT NULL
       )`);
-      // Keep storage bounded: old messages are removed automatically.
       this.ctx.storage.sql.exec(
         "DELETE FROM messages WHERE created_at < ?",
         new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
@@ -35,7 +33,7 @@ export class EviaStorage {
     const url = new URL(request.url);
 
     if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: corsHeaders });
+      return new Response(null, { status: 204, headers: securityHeaders });
     }
 
     if (url.pathname === "/send" && request.method === "POST") {
@@ -46,8 +44,12 @@ export class EviaStorage {
         return json({ error: "JSON inválido" }, 400);
       }
 
-      const device = String(body.device || "").trim().slice(0, 40);
-      const message = String(body.message || "").trim().slice(0, 4000);
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return json({ error: "El cuerpo debe ser un objeto JSON" }, 400);
+      }
+
+      const device = typeof body.device === "string" ? body.device.trim().slice(0, 40) : "";
+      const message = typeof body.message === "string" ? body.message.trim().slice(0, 4000) : "";
       if (!device || !message) {
         return json({ error: "Falta dispositivo o mensaje" }, 400);
       }
@@ -59,7 +61,6 @@ export class EviaStorage {
         id, device, message, created_at
       );
 
-      // Cap retained rows to the newest 1,000 messages.
       this.ctx.storage.sql.exec(
         "DELETE FROM messages WHERE id IN (SELECT id FROM messages ORDER BY created_at DESC LIMIT -1 OFFSET 1000)"
       );
