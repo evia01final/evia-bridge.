@@ -2,6 +2,9 @@ name = "evia-bridge"
 main = "index.js"
 compatibility_date = "2026-10-01"
 
+[triggers]
+crons = ["*/1 * * * *"]
+
 [[durable_objects.bindings]]
 name = "EVIA_STORAGE"
 class_name = "EviaStorage"
