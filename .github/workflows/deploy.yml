@@ -36,6 +36,19 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
 
+      - name: Verify Cloudflare token without exposing account details
+        shell: bash
+        run: |
+          if wrangler whoami >/tmp/whoami.log 2>&1; then
+            echo "Cloudflare API token authentication succeeded."
+          else
+            echo "Cloudflare API token authentication failed. Details are withheld to avoid exposing account information."
+            exit 1
+          fi
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
       - name: Deploy Worker
         run: wrangler deploy
         env:
