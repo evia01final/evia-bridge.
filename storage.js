@@ -3,12 +3,14 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, X-Evia-Token"
 };
+
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" }
   });
 }
+
 export class EviaStorage {
   constructor(ctx, env) {
     this.ctx = ctx;
@@ -20,25 +22,48 @@ export class EviaStorage {
         message TEXT NOT NULL,
         created_at TEXT NOT NULL
       )`);
+      // Keep storage bounded: old messages are removed automatically.
+      this.ctx.storage.sql.exec(
+        "DELETE FROM messages WHERE created_at < ?",
+        new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+      );
     });
   }
+
   async fetch(request) {
     await this.ready;
     const url = new URL(request.url);
-    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders });
+
+    if (request.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: corsHeaders });
+    }
 
     if (url.pathname === "/send" && request.method === "POST") {
       let body;
-      try { body = await request.json(); } catch { return json({ error: "JSON inválido" }, 400); }
+      try {
+        body = await request.json();
+      } catch {
+        return json({ error: "JSON inválido" }, 400);
+      }
+
       const device = String(body.device || "").trim().slice(0, 40);
       const message = String(body.message || "").trim().slice(0, 4000);
-      if (!device || !message) return json({ error: "Falta dispositivo o mensaje" }, 400);
+      if (!device || !message) {
+        return json({ error: "Falta dispositivo o mensaje" }, 400);
+      }
+
       const id = crypto.randomUUID();
       const created_at = new Date().toISOString();
       this.ctx.storage.sql.exec(
         "INSERT INTO messages (id, device, message, created_at) VALUES (?, ?, ?, ?)",
         id, device, message, created_at
       );
+
+      // Cap retained rows to the newest 1,000 messages.
+      this.ctx.storage.sql.exec(
+        "DELETE FROM messages WHERE id IN (SELECT id FROM messages ORDER BY created_at DESC LIMIT -1 OFFSET 1000)"
+      );
+
       return json({ ok: true, id, created_at });
     }
 
@@ -50,6 +75,7 @@ export class EviaStorage {
       const messages = [...rows].filter(m => m.device !== device);
       return json({ messages });
     }
+
     return json({ error: "Ruta no encontrada" }, 404);
   }
 }
