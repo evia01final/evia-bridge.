@@ -15,6 +15,7 @@ export class EviaStorage {
     this.ctx = ctx;
     this.env = env;
     this.ready = this.ctx.blockConcurrencyWhile(async () => {
+      this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS auto_reply (device TEXT PRIMARY KEY, enabled INTEGER NOT NULL)`);
       this.ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS messages (
         id TEXT PRIMARY KEY,
         device TEXT NOT NULL,
@@ -34,6 +35,22 @@ export class EviaStorage {
 
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: securityHeaders });
+    }
+
+    if (url.pathname === "/auto-reply" && request.method === "GET") {
+      const device = (url.searchParams.get("device") || "").trim().slice(0, 40);
+      if (!device) return json({ error: "Falta dispositivo" }, 400);
+      const rows = this.ctx.storage.sql.exec("SELECT enabled FROM auto_reply WHERE device = ?", device);
+      return json({ enabled: rows.toArray().length > 0 && rows.toArray()[0].enabled === 1 });
+    }
+
+    if (url.pathname === "/auto-reply" && request.method === "POST") {
+      let body;
+      try { body = await request.json(); } catch { return json({ error: "JSON inválido" }, 400); }
+      const device = typeof body?.device === "string" ? body.device.trim().slice(0, 40) : "";
+      if (!device || typeof body.enabled !== "boolean") return json({ error: "Falta dispositivo o estado" }, 400);
+      this.ctx.storage.sql.exec("INSERT INTO auto_reply (device, enabled) VALUES (?, ?) ON CONFLICT(device) DO UPDATE SET enabled = excluded.enabled", device, body.enabled ? 1 : 0);
+      return json({ ok: true, device, enabled: body.enabled });
     }
 
     if (url.pathname === "/send" && request.method === "POST") {
@@ -65,6 +82,18 @@ export class EviaStorage {
         "DELETE FROM messages WHERE id IN (SELECT id FROM messages ORDER BY created_at DESC LIMIT -1 OFFSET 1000)"
       );
 
+      // Server-side acknowledgements do not depend on a browser polling in the background.
+      if (!/^RECIBIDO(?:\\b|:)/i.test(message)) {
+        const enabled = this.ctx.storage.sql.exec("SELECT device FROM auto_reply WHERE enabled = 1").toArray();
+        for (const row of enabled) {
+          if (row.device === device) continue;
+          const ackId = crypto.randomUUID();
+          this.ctx.storage.sql.exec(
+            "INSERT INTO messages (id, device, message, created_at) VALUES (?, ?, ?, ?)",
+            ackId, row.device, "RECIBIDO: " + device + " — mensaje recibido.", new Date().toISOString()
+          );
+        }
+      }
       return json({ ok: true, id, created_at });
     }
 
