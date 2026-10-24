@@ -23,6 +23,7 @@ const gptOpenApi = {
   },
   servers: [{ url: "https://evia-bridge.jc6677844956.workers.dev" }],
   components: {
+    schemas: {},
     securitySchemes: {
       EviaToken: { type: "apiKey", in: "header", name: "X-Evia-Token" }
     }
