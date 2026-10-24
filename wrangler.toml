@@ -12,3 +12,6 @@ class_name = "EviaStorage"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["EviaStorage"]
+
+[ai]
+binding = "AI"
