@@ -73,7 +73,7 @@ async function coordinate(env) {
       answer = (data.output || []).flatMap(item => item.content || []).filter(item => item.type === "output_text").map(item => item.text).join("\\n").trim();
       if (!answer) answer = "No pude generar una respuesta esta vez.";
     } catch (error) {
-      answer = "Evia IA: no pude procesar el mensaje. Revisa que OPENAI_API_KEY sea una clave válida y tenga acceso al modelo configurado.";
+      answer = "Evia IA: fallo OpenAI (" + (error && error.message ? String(error.message).replace(/[^a-zA-Z0-9 _:-]/g, "").slice(0, 100) : "error desconocido") + ").";
     }
     const sent = await stub.fetch("https://evia-storage/coordinator/send", {
       method: "POST",
