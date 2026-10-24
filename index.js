@@ -46,7 +46,7 @@ loadAutoReply();setInterval(()=>{if($('token').value.trim())refresh()},10000);
 </script></main></body></html>`;
 
 async function coordinate(env) {
-  if (!env.OPENAI_API_KEY || !env.EVIA_STORAGE) throw new Error("Missing OPENAI_API_KEY or EVIA_STORAGE binding");
+  if (!env.AI || !env.EVIA_STORAGE) throw new Error("Falta el binding AI de Cloudflare o EVIA_STORAGE");
   const id = env.EVIA_STORAGE.idFromName("evia-shared-room");
   const stub = env.EVIA_STORAGE.get(id);
   // Process a small bounded batch per scheduled run to keep execution predictable.
@@ -58,20 +58,16 @@ async function coordinate(env) {
     const userText = String(message.message).replace(/^@Evia\s*/i, "").slice(0, 3500);
     let answer = "";
     try {
-      const response = await fetch("https://api.openai.com/v1/responses", {
-        method: "POST",
-        headers: { "Authorization": "Bearer " + env.OPENAI_API_KEY, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: env.OPENAI_MODEL || "gpt-4.1-mini",
-          instructions: "Eres Evia, una asistente útil que conversa en español. Responde al mensaje recibido de forma clara, breve y segura. Estás respondiendo dentro de un puente entre dispositivos; no afirmes que eres otra instancia privada de ChatGPT ni que puedes actuar fuera de este servicio.",
-          input: userText,
-          max_output_tokens: 500
-        })
+      const result = await env.AI.run("@cf/meta/llama-3.3-70b-instruct-fp8-fast", {
+        messages: [
+          { role: "system", content: "Eres Evia, una asistente útil que conversa en español. Responde al mensaje recibido de forma clara, breve y segura. Estás respondiendo dentro de un puente entre dispositivos; no afirmes que eres otra instancia privada de ChatGPT ni que puedes actuar fuera de este servicio." },
+          { role: "user", content: userText }
+        ],
+        max_tokens: 500
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data?.error?.message || "OpenAI API error " + response.status);
-      answer = (data.output || []).flatMap(item => item.content || []).filter(item => item.type === "output_text").map(item => item.text).join("\\n").trim();
+      answer = String(result?.response || result?.choices?.[0]?.message?.content || "").trim();
       if (!answer) answer = "No pude generar una respuesta esta vez.";
+
     } catch (error) {
       answer = "Evia IA: fallo OpenAI (" + (error && error.message ? String(error.message).replace(/[^a-zA-Z0-9 _:-]/g, "").slice(0, 100) : "error desconocido") + ").";
     }
@@ -92,7 +88,7 @@ export default {
     const url = new URL(request.url);
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: securityHeaders });
     if (url.pathname === "/health") {
-      return json({ ok: true, service: "Evia Bridge", storageConfigured: Boolean(env.EVIA_STORAGE), tokenConfigured: Boolean(env.EVIA_BRIDGE_TOKEN), coordinatorConfigured: Boolean(env.OPENAI_API_KEY) });
+      return json({ ok: true, service: "Evia Bridge", storageConfigured: Boolean(env.EVIA_STORAGE), tokenConfigured: Boolean(env.EVIA_BRIDGE_TOKEN), coordinatorConfigured: Boolean(env.AI) });
     }
     if (url.pathname === "/") return new Response(html, { headers: { ...securityHeaders, "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" } });
     if (!["/send", "/messages", "/auto-reply"].includes(url.pathname)) return json({ error: "Ruta no encontrada" }, 404);
