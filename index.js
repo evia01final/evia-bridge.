@@ -55,7 +55,7 @@ async function coordinate(env) {
     if (!claim.ok) throw new Error("Could not claim queued message");
     const { message } = await claim.json();
     if (!message) break;
-    const userText = String(message.message).replace(/^@Evia\\s*/i, "").slice(0, 3500);
+    const userText = String(message.message).replace(/^@Evia\s*/i, "").slice(0, 3500);
     let answer = "";
     try {
       const response = await fetch("https://api.openai.com/v1/responses", {
