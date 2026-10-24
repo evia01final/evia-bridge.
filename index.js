@@ -16,24 +16,65 @@ function json(data, status = 200) {
 
 const gptOpenApi = {
   openapi: "3.1.0",
-  info: { title: "Evia Bridge", version: "1.0.0", description: "Intercambio de mensajes entre los GPT del iPhone y Samsung. Cada GPT debe consultar mensajes y publicar su respuesta cuando se le invoque." },
+  info: {
+    title: "Evia Bridge",
+    version: "1.0.0",
+    description: "Puente de mensajes para GPT personalizados del iPhone y Samsung."
+  },
   servers: [{ url: "https://evia-bridge.jc6677844956.workers.dev" }],
-  components: { securitySchemes: { EviaToken: { type: "apiKey", in: "header", name: "X-Evia-Token" } } },
+  components: {
+    securitySchemes: {
+      EviaToken: { type: "apiKey", in: "header", name: "X-Evia-Token" }
+    }
+  },
   security: [{ EviaToken: [] }],
   paths: {
     "/gpt/messages": {
       get: {
         operationId: "readBridgeMessages",
-        summary: "Leer mensajes del otro asistente",
-        description: "Devuelve los mensajes compartidos que no fueron escritos por el dispositivo indicado. Usa device=iphone-gpt en el GPT del iPhone y device=samsung-gpt en el GPT del Samsung.",
-        parameters: [{ name: "device", in: "query", required: true, schema: { type: "string", enum: ["iphone-gpt", "samsung-gpt"] } }],
-        responses: { "200": { description: "Mensajes disponibles", content: { "application/json": { schema: { type: "object", properties: { messages: { type: "array", items: { type: "object", properties: { device: { type: "string" }, message: { type: "string" }, created_at: { type: "string" } } } } } } } } }
+        summary: "Leer mensajes del puente",
+        parameters: [
+          {
+            name: "device",
+            in: "query",
+            required: true,
+            schema: { type: "string", enum: ["iphone-gpt", "samsung-gpt"] }
+          }
+        ],
+        responses: {
+          "200": {
+            description: "Mensajes compartidos",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    messages: { type: "array", items: { type: "object" } }
+                  }
+                }
+              }
+            }
+          }
+        }
       },
       post: {
         operationId: "sendBridgeMessage",
-        summary: "Enviar mensaje al otro asistente",
-        description: "Publica un mensaje en el puente para que el otro GPT lo lea en su próxima consulta.",
-        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["device", "message"], properties: { device: { type: "string", enum: ["iphone-gpt", "samsung-gpt"] }, message: { type: "string", maxLength: 4000 } } } } } },
+        summary: "Enviar un mensaje al puente",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["device", "message"],
+                properties: {
+                  device: { type: "string", enum: ["iphone-gpt", "samsung-gpt"] },
+                  message: { type: "string", maxLength: 4000 }
+                }
+              }
+            }
+          }
+        },
         responses: { "200": { description: "Mensaje enviado" } }
       }
     }
