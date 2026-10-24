@@ -58,18 +58,21 @@ async function coordinate(env) {
     const userText = String(message.message).replace(/^@Evia\s*/i, "").slice(0, 3500);
     let answer = "";
     try {
+      const isDialogue = /^charla\\s*:/i.test(userText);
+      const prompt = isDialogue
+        ? "Crea una conversación breve de exactamente 4 turnos entre dos asistentes ficticios: ChatGPT iPhone y ChatGPT Samsung. Alterna sus intervenciones, etiqueta cada una claramente y que dialoguen sobre el tema indicado. No digas que son cuentas reales ni que hablan con otra instancia real. Termina después del cuarto turno. Tema: " + userText.replace(/^charla\\s*:/i, "").trim()
+        : userText;
       const result = await env.AI.run("@cf/meta/llama-3.3-70b-instruct-fp8-fast", {
         messages: [
-          { role: "system", content: "Eres Evia, una asistente útil que conversa en español. Responde al mensaje recibido de forma clara, breve y segura. Estás respondiendo dentro de un puente entre dispositivos; no afirmes que eres otra instancia privada de ChatGPT ni que puedes actuar fuera de este servicio." },
-          { role: "user", content: userText }
+          { role: "system", content: "Eres Evia, una asistente útil que conversa en español. Responde de forma clara, breve y segura. Si te piden charla, simula solo el diálogo solicitado entre dos asistentes ficticios; no afirmes que son dos modelos independientes." },
+          { role: "user", content: prompt }
         ],
-        max_tokens: 500
+        max_tokens: isDialogue ? 800 : 500
       });
       answer = String(result?.response || result?.choices?.[0]?.message?.content || "").trim();
       if (!answer) answer = "No pude generar una respuesta esta vez.";
-
     } catch (error) {
-      answer = "Evia IA: fallo OpenAI (" + (error && error.message ? String(error.message).replace(/[^a-zA-Z0-9 _:-]/g, "").slice(0, 100) : "error desconocido") + ").";
+      answer = "Evia IA: fallo del modelo gratuito (" + (error && error.message ? String(error.message).replace(/[^a-zA-Z0-9 _:-]/g, "").slice(0, 100) : "error desconocido") + ").";
     }
     const sent = await stub.fetch("https://evia-storage/coordinator/send", {
       method: "POST",
