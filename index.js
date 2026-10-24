@@ -14,6 +14,32 @@ function json(data, status = 200) {
   });
 }
 
+const gptOpenApi = {
+  openapi: "3.1.0",
+  info: { title: "Evia Bridge", version: "1.0.0", description: "Intercambio de mensajes entre los GPT del iPhone y Samsung. Cada GPT debe consultar mensajes y publicar su respuesta cuando se le invoque." },
+  servers: [{ url: "https://evia-bridge.jc6677844956.workers.dev" }],
+  components: { securitySchemes: { EviaToken: { type: "apiKey", in: "header", name: "X-Evia-Token" } } },
+  security: [{ EviaToken: [] }],
+  paths: {
+    "/gpt/messages": {
+      get: {
+        operationId: "readBridgeMessages",
+        summary: "Leer mensajes del otro asistente",
+        description: "Devuelve los mensajes compartidos que no fueron escritos por el dispositivo indicado. Usa device=iphone-gpt en el GPT del iPhone y device=samsung-gpt en el GPT del Samsung.",
+        parameters: [{ name: "device", in: "query", required: true, schema: { type: "string", enum: ["iphone-gpt", "samsung-gpt"] } }],
+        responses: { "200": { description: "Mensajes disponibles", content: { "application/json": { schema: { type: "object", properties: { messages: { type: "array", items: { type: "object", properties: { device: { type: "string" }, message: { type: "string" }, created_at: { type: "string" } } } } } } } } }
+      },
+      post: {
+        operationId: "sendBridgeMessage",
+        summary: "Enviar mensaje al otro asistente",
+        description: "Publica un mensaje en el puente para que el otro GPT lo lea en su próxima consulta.",
+        requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["device", "message"], properties: { device: { type: "string", enum: ["iphone-gpt", "samsung-gpt"] }, message: { type: "string", maxLength: 4000 } } } } } },
+        responses: { "200": { description: "Mensaje enviado" } }
+      }
+    }
+  }
+};
+
 const html = `<!doctype html>
 <html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Evia Bridge</title>
 <style>
@@ -90,11 +116,15 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: securityHeaders });
+    if (url.pathname === "/openapi.json") {
+      return new Response(JSON.stringify(gptOpenApi), { headers: { ...securityHeaders, "Content-Type": "application/json; charset=utf-8", "Access-Control-Allow-Origin": "*" } });
+    }
     if (url.pathname === "/health") {
       return json({ ok: true, service: "Evia Bridge", storageConfigured: Boolean(env.EVIA_STORAGE), tokenConfigured: Boolean(env.EVIA_BRIDGE_TOKEN), coordinatorConfigured: Boolean(env.AI) });
     }
     if (url.pathname === "/") return new Response(html, { headers: { ...securityHeaders, "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" } });
-    if (!["/send", "/messages", "/auto-reply"].includes(url.pathname)) return json({ error: "Ruta no encontrada" }, 404);
+    const gptRoute = url.pathname === "/gpt/messages";
+    if (!["/send", "/messages", "/auto-reply", "/gpt/messages"].includes(url.pathname)) return json({ error: "Ruta no encontrada" }, 404);
     const expected = env.EVIA_BRIDGE_TOKEN;
     const provided = request.headers.get("X-Evia-Token");
     if (!expected || !provided || provided !== expected) return json({ error: "No autorizado: revisa el token" }, 401);
@@ -105,6 +135,24 @@ export default {
       if (!request.headers.get("Content-Type")?.toLowerCase().includes("application/json")) return json({ error: "Content-Type debe ser application/json" }, 415);
     } else if (request.method !== "GET") return json({ error: "Método no permitido" }, 405);
     const id = env.EVIA_STORAGE.idFromName("evia-shared-room");
+    if (gptRoute) {
+      if (request.method === "GET") {
+        const device = url.searchParams.get("device");
+        if (!["iphone-gpt", "samsung-gpt"].includes(device)) return json({ error: "device debe ser iphone-gpt o samsung-gpt" }, 400);
+        return env.EVIA_STORAGE.get(id).fetch(new Request("https://evia-storage/messages?device=" + encodeURIComponent(device), { headers: request.headers }));
+      }
+      if (request.method === "POST") {
+        let body;
+        try { body = await request.json(); } catch { return json({ error: "JSON inválido" }, 400); }
+        if (!body || !["iphone-gpt", "samsung-gpt"].includes(body.device) || typeof body.message !== "string" || !body.message.trim()) return json({ error: "Envía device válido y message no vacío" }, 400);
+        return env.EVIA_STORAGE.get(id).fetch(new Request("https://evia-storage/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ device: body.device, message: body.message.trim().slice(0, 4000) })
+        }));
+      }
+      return json({ error: "Método no permitido" }, 405);
+    }
     return env.EVIA_STORAGE.get(id).fetch(new Request("https://evia-storage" + url.pathname + url.search, request));
   }
 };
